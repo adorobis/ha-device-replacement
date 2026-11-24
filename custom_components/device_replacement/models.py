@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .references import DeviceAutomationUse, Reference
 
 
 class Level(StrEnum):
@@ -77,6 +80,8 @@ class Plan:
     unmatched_old: list[EntityDescriptor]
     unmatched_new: list[EntityDescriptor]
     device_checks: list[Check]
+    references: list[Reference] = field(default_factory=list)
+    device_automations: list[DeviceAutomationUse] = field(default_factory=list)
 
     @property
     def blocking(self) -> list[Check]:
@@ -123,4 +128,6 @@ class Plan:
             "unmatched_old": [ent(d) for d in self.unmatched_old],
             "unmatched_new": [ent(d) for d in self.unmatched_new],
             "device_checks": [chk(c) for c in self.device_checks],
+            "references": [r.as_dict() for r in self.references],
+            "device_automations": [u.as_dict() for u in self.device_automations],
         }

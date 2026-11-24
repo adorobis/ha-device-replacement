@@ -32,7 +32,7 @@ from .const import (
     SERVICE_PLAN,
 )
 from .executor import Executor
-from .planner import build_plan
+from .planner import async_build_plan
 
 if TYPE_CHECKING:
     from .journal import Journal
@@ -66,8 +66,8 @@ def _journal(hass: HomeAssistant) -> Journal:
     return entries[0].runtime_data
 
 
-def _plan(hass: HomeAssistant, data: dict[str, Any]):
-    return build_plan(
+async def _plan(hass: HomeAssistant, data: dict[str, Any]):
+    return await async_build_plan(
         hass,
         data[ATTR_OLD_DEVICE_ID],
         data[ATTR_NEW_DEVICE_ID],
@@ -82,14 +82,14 @@ def async_setup_services(hass: HomeAssistant) -> None:
 
     async def plan(call: ServiceCall) -> ServiceResponse:
         _journal(hass)
-        return _plan(hass, call.data).as_dict()
+        return (await _plan(hass, call.data)).as_dict()
 
     async def execute(call: ServiceCall) -> ServiceResponse:
         journal = _journal(hass)
         executor = Executor(
             hass,
             journal,
-            _plan(hass, call.data),
+            await _plan(hass, call.data),
             keep_units=call.data[ATTR_KEEP_UNITS],
             adjust_energy=call.data[ATTR_ADJUST_ENERGY],
             remove_old_device=call.data[ATTR_REMOVE_OLD_DEVICE],

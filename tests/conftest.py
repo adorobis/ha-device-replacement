@@ -11,10 +11,12 @@ from dataclasses import dataclass, field
 from typing import Any
 from unittest.mock import patch
 
+from homeassistant.components.device_automation import DEVICE_TRIGGER_BASE_SCHEMA
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry, ConfigFlow
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.setup import async_setup_component
@@ -27,6 +29,7 @@ from pytest_homeassistant.common import (
     mock_integration,
     mock_platform,
 )
+import voluptuous as vol
 
 from custom_components.device_replacement.const import DOMAIN
 
@@ -127,6 +130,41 @@ def fast_timeouts() -> Iterable[None]:
         yield
 
 
+class FakeDeviceTrigger:
+    """device_trigger platform: only old1 has a button."""
+
+    TRIGGER_SCHEMA = DEVICE_TRIGGER_BASE_SCHEMA.extend(
+        {vol.Required("type"): str, vol.Optional("subtype"): str}
+    )
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        """Remember hass to look up devices."""
+        self.hass = hass
+
+    async def async_get_triggers(self, hass: HomeAssistant, device_id: str) -> list[dict]:
+        """Return the triggers of a device."""
+        device = dr.async_get(hass).async_get(device_id)
+        if device is None or (FAKE, "old1") not in device.identifiers:
+            return []
+        return [
+            {
+                "platform": "device",
+                "domain": FAKE,
+                "device_id": device_id,
+                "type": "button_short_press",
+                "subtype": "button_1",
+            }
+        ]
+
+    async def async_validate_trigger_config(self, hass: HomeAssistant, config: dict) -> dict:
+        """Validate a trigger."""
+        return self.TRIGGER_SCHEMA(config)
+
+    async def async_attach_trigger(self, hass, config, action, trigger_info):
+        """Attach a trigger that never fires."""
+        return lambda: None
+
+
 class FakeFlow(ConfigFlow):
     """Config flow of the fake integration (never run)."""
 
@@ -152,6 +190,7 @@ async def fakedev(hass: HomeAssistant) -> AsyncIterator[None]:
     module.async_remove_config_entry_device = remove_device
     mock_integration(hass, module)
     mock_platform(hass, f"{FAKE}.config_flow", None)
+    mock_platform(hass, f"{FAKE}.device_trigger", FakeDeviceTrigger(hass))
     mock_platform(hass, f"{FAKE}.sensor", _platform("sensor", FakeSensor))
     mock_platform(hass, f"{FAKE}.switch", _platform("switch", FakeSwitch))
     with mock_config_flow(FAKE, FakeFlow):
@@ -193,6 +232,7 @@ NEW_ENTITIES = [
 async def devices(hass: HomeAssistant, fakedev: None) -> tuple[MockConfigEntry, MockConfigEntry]:
     """Set up Device Replacement, an old plug (W, kWh) and a new plug (kW, Wh)."""
     assert await async_setup_component(hass, "homeassistant", {})
+    assert await async_setup_component(hass, "persistent_notification", {})
     entry = MockConfigEntry(domain=DOMAIN, title="Device Replacement")
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)

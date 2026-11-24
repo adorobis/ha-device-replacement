@@ -5,7 +5,8 @@ their entity IDs, history, long-term statistics, names, icons, areas and display
 and move to the new device. Automations, scripts, dashboards and the Energy dashboard
 keep working without edits.
 
-> Status: **0.1.0, Phase 1 (engine + actions)**. No UI wizard yet. Tested on
+> Status: **0.1.0, Phases 1 and 3 (engine, actions, references, Repairs)**. No UI
+> wizard or undo yet. Tested on
 > Home Assistant 2026.11 with MQTT devices and in tests with one config entry per
 > device (Shelly-like).
 
@@ -33,6 +34,27 @@ Order of operations:
    happen, the entry is reloaded directly.
 5. **Clean up:** remove the tombstones and purge their temporary history and
    statistics. Optionally remove the old device. Correct the statistics sum of meters.
+6. **References:** point device IDs at the new device and report what is left (below).
+
+### References
+
+Mapped entities keep their `entity_id`, so nothing that refers to them changes. The
+old device's **device ID** is replaced with the new one in `automations.yaml`,
+`scripts.yaml`, `scenes.yaml` and in dashboards stored in the UI (device triggers,
+conditions and actions, `target: device_id`, device cards). YAML you wrote yourself
+(packages, YAML dashboards) is not touched.
+
+The plan shows, and after the replacement **Repairs** lists:
+
+| Issue | When |
+|---|---|
+| Entity not carried over | An unmapped old entity is still used in an automation, script, scene, group or dashboard |
+| Device trigger not offered | An automation uses an integration-specific device trigger, condition or action (a button's "short press") that the new device does not offer |
+| Still refers to the old device | A device ID could not be rewritten because the config is YAML |
+
+Each issue is fixed by you; confirming it in Repairs removes it. Entity-based device
+triggers ("switch turned on") need nothing: they refer to the entity's registry ID,
+which is kept.
 
 ### Why tombstones
 
@@ -84,12 +106,11 @@ response_variable: plan
 
 ## Not done yet
 
-- Rewriting device IDs in automations, scripts, scenes and dashboards. Entity-based
-  device triggers keep working because they refer to the entity's registry ID, which is
-  kept. Integration-specific device triggers (button events) still need it.
-- Reporting where unmapped old entities are used (Repairs issues).
 - Undo from the journal.
 - UI wizard.
+- References in helpers that keep their own entity lists (template, utility meter,
+  statistics sensors) are not scanned; mapped entities are unaffected since their
+  `entity_id` stays.
 
 ## Development
 

@@ -45,6 +45,8 @@ from .const import (
 )
 from .journal import Journal
 from .models import EntityPair, Plan
+from .references import Reference, async_find_references, async_rewrite_device_id
+from .repairs import async_create_replacement_issues
 from .statistics import (
     adjust_sum,
     apply_after,
@@ -274,10 +276,12 @@ class Executor:
                 "The new entities did not come back; the tombstone entries are kept "
                 "and Home Assistant should be restarted"
             )
+        leftover = await self._async_update_references()
         if self.remove_old_device:
             await self._async_remove_old_device()
         if self.adjust_energy:
             self._schedule_sum_adjustments(meters)
+        await self._async_report_issues(leftover)
 
     async def _async_meter_readings(self, pairs: list[EntityPair]) -> dict[str, tuple[float, str]]:
         """Return the old meters' last readings in their statistics unit."""
@@ -403,6 +407,34 @@ class Executor:
             )
             get_instance(self.hass).async_clear_statistics(removed)
         Journal.step(self.record, "tombstones_removed", entities=removed)
+
+    async def _async_update_references(self) -> list[Reference]:
+        """Point device references at the new device; return what could not be."""
+        old, new = self.plan.old_device_id, self.plan.new_device_id
+        rewritten = await async_rewrite_device_id(self.hass, old, new)
+        leftover = await async_find_references(self.hass, [], [old])
+        Journal.step(
+            self.record,
+            "references_updated",
+            rewritten=rewritten,
+            not_rewritten=[r.as_dict() for r in leftover],
+        )
+        for ref in leftover:
+            self._warn(f"{ref.kind} {ref.name} still refers to the old device")
+        return leftover
+
+    async def _async_report_issues(self, leftover: list[Reference]) -> None:
+        unmapped = {d.entity_id for d in self.plan.unmatched_old}
+        still_used = await async_find_references(self.hass, unmapped, [])
+        self.record["issues"] = async_create_replacement_issues(
+            self.hass,
+            record_id=self.record["id"],
+            old_device_name=self.plan.old_device_name,
+            new_device_name=self.plan.new_device_name,
+            unmapped_in_use=still_used,
+            unsupported=[u for u in self.plan.device_automations if not u.supported],
+            not_rewritten=leftover,
+        )
 
     async def _async_remove_old_device(self) -> None:
         device = self.dreg.async_get(self.plan.old_device_id)

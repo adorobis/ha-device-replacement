@@ -1,7 +1,15 @@
 {
   "domain": "device_replacement",
   "name": "Device Replacement",
-  "after_dependencies": ["automation", "recorder", "scene", "script"],
+  "after_dependencies": [
+    "automation",
+    "group",
+    "lovelace",
+    "recorder",
+    "repairs",
+    "scene",
+    "script"
+  ],
   "categories": ["helpers"],
   "codeowners": ["@adorobis"],
   "config_flow": true,

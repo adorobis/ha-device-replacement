@@ -14,6 +14,7 @@ from .compat import check_pair
 from .const import DOMAIN, MATCH_THRESHOLD, TOMBSTONE_SUFFIX
 from .matcher import match, score
 from .models import Check, EntityDescriptor, EntityPair, Level, Plan
+from .references import async_device_automation_uses, async_find_references, registry_ids
 
 
 def describe(hass: HomeAssistant, entry: er.RegistryEntry) -> EntityDescriptor:
@@ -189,3 +190,45 @@ def build_plan(
         unmatched_new=[d for k, d in sorted(new.items()) if k not in used_new],
         device_checks=device_checks,
     )
+
+
+async def async_build_plan(
+    hass: HomeAssistant,
+    old_device_id: str,
+    new_device_id: str,
+    mapping: Mapping[str, str | None] | None = None,
+    auto_match: bool = True,
+) -> Plan:
+    """Return the plan, with what refers to the old device and its unmapped entities."""
+    plan = build_plan(hass, old_device_id, new_device_id, mapping, auto_match)
+    unmapped = [d.entity_id for d in plan.unmatched_old]
+    plan.references = await async_find_references(hass, unmapped, [old_device_id])
+    for eid in unmapped:
+        used = [r for r in plan.references if r.target == eid]
+        if used:
+            plan.device_checks.append(
+                Check(
+                    Level.WARNING,
+                    "unmapped_entity_in_use",
+                    f"{eid} is not mapped but is used in "
+                    + ", ".join(f"{r.kind} {r.name}" for r in used),
+                    {"entity_id": eid, "used_in": [r.item for r in used]},
+                )
+            )
+    mapped = registry_ids(hass, [p.old.entity_id for p in plan.pairs])
+    plan.device_automations = await async_device_automation_uses(
+        hass, old_device_id, new_device_id, mapped
+    )
+    for use in plan.device_automations:
+        if not use.supported:
+            plan.device_checks.append(
+                Check(
+                    Level.WARNING,
+                    "device_automation_unsupported",
+                    f"{use.name} uses the device {use.section} {use.type}"
+                    + (f" ({use.subtype})" if use.subtype else "")
+                    + f", which {plan.new_device_name} does not offer",
+                    use.as_dict(),
+                )
+            )
+    return plan

@@ -10,26 +10,65 @@
     }
   },
   "exceptions": {
-    "device_not_found": { "message": "Device {device_id} not found." },
-    "new_not_unloaded": { "message": "These entities of the new device did not unload: {entities}." },
-    "not_loaded": { "message": "Device Replacement is not loaded." },
-    "nothing_to_migrate": { "message": "No entity of the old device is mapped to the new device." },
-    "old_not_unloaded": { "message": "These entities of the old device did not unload: {entities}." },
-    "plan_blocked": { "message": "The replacement is blocked: {reasons}" }
+    "device_not_found": {
+      "message": "Device {device_id} not found."
+    },
+    "new_not_unloaded": {
+      "message": "These entities of the new device did not unload: {entities}."
+    },
+    "not_loaded": {
+      "message": "Device Replacement is not loaded."
+    },
+    "nothing_to_migrate": {
+      "message": "No entity of the old device is mapped to the new device."
+    },
+    "old_not_unloaded": {
+      "message": "These entities of the old device did not unload: {entities}."
+    },
+    "plan_blocked": {
+      "message": "The replacement is blocked: {reasons}"
+    }
   },
   "services": {
     "execute": {
       "description": "Replaces the old device with the new one. Mapped entities keep their entity ID, history, statistics and settings and move to the new device.",
       "fields": {
-        "adjust_energy": { "description": "Correct the statistics sum of meters so the swap does not count as consumption.", "name": "Correct meter sums" },
-        "auto_match": { "description": "Match old entities not in the mapping automatically.", "name": "Match automatically" },
-        "dry_run": { "description": "Only record what would be done.", "name": "Dry run" },
-        "force": { "description": "Run even if the old device still looks online or units do not convert.", "name": "Force" },
-        "keep_units": { "description": "Keep showing sensors in the old unit when the new one reports a convertible unit.", "name": "Keep units" },
-        "mapping": { "description": "Old entity ID to new entity ID; null leaves an old entity unmapped.", "name": "Mapping" },
-        "new_device_id": { "description": "The device taking over.", "name": "New device" },
-        "old_device_id": { "description": "The device being replaced; it must be offline.", "name": "Old device" },
-        "remove_old_device": { "description": "Remove the old device afterwards, if its integration allows it.", "name": "Remove old device" }
+        "adjust_energy": {
+          "description": "Correct the statistics sum of meters so the swap does not count as consumption.",
+          "name": "Correct meter sums"
+        },
+        "auto_match": {
+          "description": "Match old entities not in the mapping automatically.",
+          "name": "Match automatically"
+        },
+        "dry_run": {
+          "description": "Only record what would be done.",
+          "name": "Dry run"
+        },
+        "force": {
+          "description": "Run even if the old device still looks online or units do not convert.",
+          "name": "Force"
+        },
+        "keep_units": {
+          "description": "Keep showing sensors in the old unit when the new one reports a convertible unit.",
+          "name": "Keep units"
+        },
+        "mapping": {
+          "description": "Old entity ID to new entity ID; null leaves an old entity unmapped.",
+          "name": "Mapping"
+        },
+        "new_device_id": {
+          "description": "The device taking over.",
+          "name": "New device"
+        },
+        "old_device_id": {
+          "description": "The device being replaced; it must be offline.",
+          "name": "Old device"
+        },
+        "remove_old_device": {
+          "description": "Remove the old device afterwards, if its integration allows it.",
+          "name": "Remove old device"
+        }
       },
       "name": "Replace device"
     },
@@ -40,12 +79,59 @@
     "plan": {
       "description": "Returns the proposed entity mapping and the compatibility checks, without changing anything.",
       "fields": {
-        "auto_match": { "description": "Match old entities not in the mapping automatically.", "name": "Match automatically" },
-        "mapping": { "description": "Old entity ID to new entity ID; null leaves an old entity unmapped.", "name": "Mapping" },
-        "new_device_id": { "description": "The device taking over.", "name": "New device" },
-        "old_device_id": { "description": "The device being replaced.", "name": "Old device" }
+        "auto_match": {
+          "description": "Match old entities not in the mapping automatically.",
+          "name": "Match automatically"
+        },
+        "mapping": {
+          "description": "Old entity ID to new entity ID; null leaves an old entity unmapped.",
+          "name": "Mapping"
+        },
+        "new_device_id": {
+          "description": "The device taking over.",
+          "name": "New device"
+        },
+        "old_device_id": {
+          "description": "The device being replaced.",
+          "name": "Old device"
+        }
       },
       "name": "Plan replacement"
+    }
+  },
+  "issues": {
+    "unmapped_entity_in_use": {
+      "title": "{entity_id} was not carried over to {new_device}",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "{entity_id} was not carried over to {new_device}",
+            "description": "When {old_device} was replaced with {new_device}, {entity_id} had no counterpart on the new device, but it is still used in: {used_in}.\n\nChange or remove those references, then confirm."
+          }
+        }
+      }
+    },
+    "device_automation_unsupported": {
+      "title": "{automation} uses a device {section} {new_device} does not offer",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "{automation} uses a device {section} {new_device} does not offer",
+            "description": "{automation} uses the device {section} \"{type}\" of {old_device}. Its device ID now points at {new_device}, which does not offer it, so it will not work.\n\nEdit the automation to use something {new_device} offers, then confirm."
+          }
+        }
+      }
+    },
+    "device_reference_not_rewritten": {
+      "title": "{kind} {name} still refers to {old_device}",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "{kind} {name} still refers to {old_device}",
+            "description": "The {kind} {name} refers to the replaced device {old_device} in configuration that Home Assistant does not manage (YAML), so it was not updated. Replace the old device ID with the one of {new_device}, then confirm."
+          }
+        }
+      }
     }
   }
 }
