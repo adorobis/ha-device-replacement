@@ -27,6 +27,12 @@
     },
     "plan_blocked": {
       "message": "The replacement is blocked: {reasons}"
+    },
+    "undo_impossible": {
+      "message": "Replacement {record_id} cannot be undone: {reason}."
+    },
+    "record_not_found": {
+      "message": "No replacement that can be undone was found ({record_id})."
     }
   },
   "services": {
@@ -97,6 +103,16 @@
         }
       },
       "name": "Plan replacement"
+    },
+    "undo": {
+      "name": "Undo replacement",
+      "description": "Moves the entities back to the old device, restores the new device's settings and device references, and removes the Repairs issues of the replacement.",
+      "fields": {
+        "record_id": {
+          "name": "Replacement",
+          "description": "ID of the journal record; the latest replacement that can be undone if empty."
+        }
+      }
     }
   },
   "issues": {
@@ -132,6 +148,68 @@
           }
         }
       }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Device Replacement",
+        "menu_options": {
+          "replace": "Replace a device",
+          "undo": "Undo a replacement"
+        }
+      },
+      "replace": {
+        "title": "Replace a device",
+        "description": "Pick the device that broke and the device taking its place. The old device should be offline.",
+        "data": {
+          "old_device_id": "Old device",
+          "new_device_id": "New device"
+        }
+      },
+      "mapping": {
+        "title": "Map entities",
+        "description": "For every entity of {old_device}, choose the entity of {new_device} that takes over. A mapped entity keeps its entity ID, history, statistics and settings; the new entity's own ID disappears."
+      },
+      "confirm": {
+        "title": "Replace {old_device} with {new_device}",
+        "description": "{summary}",
+        "data": {
+          "keep_units": "Keep units",
+          "adjust_energy": "Correct meter sums",
+          "remove_old_device": "Remove the old device afterwards",
+          "force": "Replace despite the blocking problems"
+        },
+        "data_description": {
+          "keep_units": "Keep showing sensors in the old unit when the new device reports another unit that converts (kW instead of W).",
+          "adjust_energy": "Shift the statistics sum of meters so the swap does not count as consumption.",
+          "remove_old_device": "Removing the old device makes the replacement impossible to undo.",
+          "force": "For example when the integration never marks a dead device unavailable."
+        }
+      },
+      "undo": {
+        "title": "Undo a replacement",
+        "description": "The entities go back to the old device, which is enabled again. Statistics are not changed.",
+        "data": {
+          "record_id": "Replacement"
+        }
+      }
+    },
+    "progress": {
+      "replacing": "Replacing the device. The integration of the new device reloads, which can take up to a minute.",
+      "undoing": "Undoing the replacement. The integrations reload, which can take up to a minute."
+    },
+    "abort": {
+      "replaced": "The device was replaced.\\n\\n{summary}",
+      "undone": "The replacement was undone.\\n\\n{summary}",
+      "failed": "It did not work: {error}",
+      "nothing_to_undo": "There is no replacement that can be undone. Recent replacements:\n\n{recent}"
+    },
+    "error": {
+      "same_device": "Pick two different devices.",
+      "duplicate_new": "A new entity can take over only one old entity.",
+      "nothing_mapped": "Map at least one entity.",
+      "blocked": "{reasons}"
     }
   }
 }

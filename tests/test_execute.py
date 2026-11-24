@@ -15,18 +15,9 @@ import pytest
 
 from custom_components.device_replacement.const import DOMAIN, TOMBSTONE_SUFFIX
 
-from .conftest import DEVICES
+from .conftest import DEVICES, _device_id
 
 pytestmark = pytest.mark.parametrize("expected_lingering_timers", [True])
-
-
-def _device_id(hass: HomeAssistant, serial: str) -> str:
-    entry = next(
-        e for e in hass.config_entries.async_entries("fakedev") if e.data["serial"] == serial
-    )
-    device = dr.async_get(hass).async_get_device_by_identifier(("fakedev", serial), entry.entry_id)
-    assert device is not None
-    return device.id
 
 
 async def _call(hass: HomeAssistant, service: str, **data: Any) -> dict[str, Any]:

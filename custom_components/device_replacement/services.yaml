@@ -57,3 +57,10 @@ execute:
         boolean: {}
 
 journal: {}
+
+undo:
+  fields:
+    record_id:
+      example: 01JABCDEFGHJKMNPQRSTVWXYZ0
+      selector:
+        text: {}

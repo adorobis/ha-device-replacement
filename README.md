@@ -5,8 +5,8 @@ their entity IDs, history, long-term statistics, names, icons, areas and display
 and move to the new device. Automations, scripts, dashboards and the Energy dashboard
 keep working without edits.
 
-> Status: **0.1.0, Phases 1 and 3 (engine, actions, references, Repairs)**. No UI
-> wizard or undo yet. Tested on
+> Status: **0.1.0**: engine, actions, reference rewriting, Repairs issues, undo and a
+> UI wizard. Tested on
 > Home Assistant 2026.11 with MQTT devices and in tests with one config entry per
 > device (Shelly-like).
 
@@ -72,12 +72,37 @@ the 5-minute period holding the first new reading is compiled, the sum is shifte
 exactly that amount (`recorder.async_adjust_statistics`). The correction is journaled and
 resumed after a restart.
 
+## Using it
+
+Add the integration (Settings → Devices & services → Add integration → Device
+Replacement), then open it and choose **Configure**:
+
+1. **Replace a device**: pick the old (broken) and the new device.
+2. **Map entities**: every old entity gets a dropdown with the suggested new entity,
+   or "don't carry over".
+3. **Review**: the mapping with its checks, what is not carried over, and the options
+   (keep units, correct meter sums, remove the old device, force).
+4. The replacement runs with a progress screen (up to a minute while the new device's
+   integration reloads) and ends with a summary.
+
+**Undo a replacement** in the same menu lists the replacements that can be undone.
+
+## Undo
+
+Undo moves the entities back to the old device with their old unique IDs, enables the old
+device again, restores the new device's settings, puts the old device ID back where it
+was rewritten, and deletes the replacement's Repairs issues. The new device's integration
+creates its own entities again under their original IDs. Statistics are left as they are.
+
+A replacement that removed the old device cannot be undone.
+
 ## Actions
 
 | Action | What it does |
 |---|---|
 | `device_replacement.plan` | Returns the proposed mapping and checks; changes nothing |
 | `device_replacement.execute` | Runs the replacement and returns its journal record |
+| `device_replacement.undo` | Undoes a replacement (the latest one that can be undone if no `record_id`) |
 | `device_replacement.journal` | Returns the records of past replacements |
 
 ```yaml
@@ -104,10 +129,8 @@ response_variable: plan
 | `device_class_changed`, `features_missing`, `options_missing`, `unit_added_or_removed`, `new_device_unavailable`, `restart_required` | warning |
 | `unit_converted`, `meter_swap` | info |
 
-## Not done yet
+## Limitations
 
-- Undo from the journal.
-- UI wizard.
 - References in helpers that keep their own entity lists (template, utility meter,
   statistics sensors) are not scanned; mapped entities are unaffected since their
   `entity_id` stays.

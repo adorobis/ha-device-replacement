@@ -20,3 +20,6 @@ testpaths = ["tests"]
 
 [tool.coverage.run]
 source = ["custom_components/device_replacement"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["PLR0915"]

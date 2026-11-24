@@ -3,90 +3,19 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from homeassistant.components.lovelace import LOVELACE_DATA
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import entity_registry as er, issue_registry as ir
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.setup import async_setup_component
-from homeassistant.util.yaml import load_yaml
 import pytest
 
 from custom_components.device_replacement.const import DOMAIN
 
-from .test_execute import _call, _device_id, _go_offline
+from .conftest import _device_id
+from .test_execute import _call, _go_offline
 
 pytestmark = pytest.mark.parametrize("expected_lingering_timers", [True])
-
-
-def _automations(old_device: str, relay_registry_id: str) -> str:
-    return f"""
-- id: relay_on
-  alias: Relay on
-  triggers:
-    - trigger: device
-      domain: switch
-      device_id: {old_device}
-      entity_id: {relay_registry_id}
-      type: turned_on
-  actions:
-    - action: persistent_notification.create
-      data: {{message: relay on}}
-- id: button
-  alias: Button press
-  triggers:
-    - trigger: device
-      domain: fakedev
-      device_id: {old_device}
-      type: button_short_press
-      subtype: button_1
-  actions: []
-- id: too_hot
-  alias: Too hot
-  triggers:
-    - trigger: numeric_state
-      entity_id: sensor.old_plug_device_temperature
-      above: 80
-  actions: []
-"""
-
-
-@pytest.fixture
-async def setup_config(hass: HomeAssistant, devices, tmp_path: Path) -> dict[str, Any]:
-    """Automations in automations.yaml, a YAML script and a stored dashboard."""
-    hass.config.config_dir = str(tmp_path)
-    old = _device_id(hass, "old1")
-    relay = er.async_get(hass).async_get("switch.old_plug_relay").id
-    (tmp_path / "automations.yaml").write_text(_automations(old, relay))
-    (tmp_path / "configuration.yaml").write_text("automation: !include automations.yaml\n")
-    assert await async_setup_component(
-        hass, "automation", {"automation": load_yaml(str(tmp_path / "automations.yaml"))}
-    )
-    assert await async_setup_component(
-        hass,
-        "script",
-        {
-            "script": {
-                "yaml_script": {
-                    "alias": "YAML script",
-                    "sequence": [
-                        {
-                            "action": "homeassistant.turn_on",
-                            "target": {"device_id": old},
-                        }
-                    ],
-                }
-            }
-        },
-    )
-    assert await async_setup_component(hass, "lovelace", {})
-    await (
-        hass.data[LOVELACE_DATA]
-        .dashboards[None]
-        .async_save({"views": [{"cards": [{"type": "device", "device_id": old}]}]})
-    )
-    await hass.async_block_till_done()
-    return {"old": old, "relay": relay}
 
 
 async def test_plan_reports_references(hass: HomeAssistant, setup_config) -> None:

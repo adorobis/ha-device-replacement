@@ -30,9 +30,11 @@ from .const import (
     SERVICE_EXECUTE,
     SERVICE_JOURNAL,
     SERVICE_PLAN,
+    SERVICE_UNDO,
 )
 from .executor import Executor
 from .planner import async_build_plan
+from .undo import Undoer, undoable
 
 if TYPE_CHECKING:
     from .journal import Journal
@@ -98,6 +100,22 @@ def async_setup_services(hass: HomeAssistant) -> None:
         record = await executor.async_run(dry_run=call.data[ATTR_DRY_RUN])
         return record if call.return_response else None
 
+    async def undo(call: ServiceCall) -> ServiceResponse:
+        journal = _journal(hass)
+        record_id = call.data.get("record_id")
+        if record_id is None:
+            record = next((r for r in reversed(journal.records) if undoable(hass, r)), None)
+        else:
+            record = journal.get(record_id)
+        if record is None:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="record_not_found",
+                translation_placeholders={"record_id": record_id or "latest"},
+            )
+        result = await Undoer(hass, journal, record).async_run()
+        return result if call.return_response else None
+
     async def journal(call: ServiceCall) -> ServiceResponse:
         return {"records": _journal(hass).records}
 
@@ -109,6 +127,13 @@ def async_setup_services(hass: HomeAssistant) -> None:
         SERVICE_EXECUTE,
         execute,
         schema=EXECUTE_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_UNDO,
+        undo,
+        schema=vol.Schema({vol.Optional("record_id"): cv.string}),
         supports_response=SupportsResponse.OPTIONAL,
     )
     hass.services.async_register(
