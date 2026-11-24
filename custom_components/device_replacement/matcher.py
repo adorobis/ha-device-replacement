@@ -3,20 +3,22 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 import re
 
 from .compat import units_compatible
+from .family import tokens as _words
 from .models import EntityDescriptor
 
-_TOKEN = re.compile(r"[a-z0-9]+")
 SOLE_OF_DOMAIN_BONUS = 20
+# The old entity's device is paired with the new entity's device.
+SAME_DEVICE_PAIR_BONUS = 15
+# Neither entity has a name of its own: each is its device's main entity.
+MAIN_ENTITY_BONUS = 20
 
 
 def _tokens(text: str | None, drop: set[str]) -> set[str]:
-    if not text:
-        return set()
-    return {t for t in _TOKEN.findall(text.lower()) if t not in drop}
+    return _words(text) - drop
 
 
 def name_tokens(desc: EntityDescriptor, device_tokens: set[str]) -> set[str]:
@@ -59,6 +61,10 @@ def score(
         points += 5
     if old.entity_category == new.entity_category:
         points += 5
+    if old.name is None and new.name is None:
+        # Both are their device's main entity, shown under the device's own name
+        # (the relay of a Shelly channel): strong evidence they correspond.
+        points += MAIN_ENTITY_BONUS
     a = name_tokens(old, old_device_tokens or set())
     b = name_tokens(new, new_device_tokens or set())
     if a and b:
@@ -74,12 +80,19 @@ def match(
     threshold: int,
     old_device_name: str = "",
     new_device_name: str = "",
+    *,
+    device_tokens: Mapping[str, set[str]] | None = None,
+    device_pairs: Mapping[str, str | None] | None = None,
 ) -> list[tuple[EntityDescriptor, EntityDescriptor, int]]:
     """Return a one-to-one assignment of old to new entities.
 
     Greedy on the score: the best pair first, then the best of what is left. Pairs
     below the threshold are not suggested. When both devices have exactly one entity
     of a domain (one switch each), that pair gets a bonus.
+
+    With sub-devices, device_tokens gives the name words of each entity's own device
+    (stripped from entity names) and device_pairs the paired devices: entities on
+    paired devices get a bonus, so channel 1 maps to channel 1.
     """
     old_entities, new_entities = list(old_entities), list(new_entities)
     old_tokens = _tokens(old_device_name, set())
@@ -88,10 +101,22 @@ def match(
     new_count = Counter(n.domain for n in new_entities)
 
     def points(o: EntityDescriptor, n: EntityDescriptor) -> int:
-        base = score(o, n, old_tokens, new_tokens)
-        if base and old_count[o.domain] == 1 and new_count[n.domain] == 1:
-            base = min(100, base + SOLE_OF_DOMAIN_BONUS)
-        return base
+        if device_tokens is not None:
+            base = score(
+                o,
+                n,
+                device_tokens.get(o.device_id or "", set()),
+                device_tokens.get(n.device_id or "", set()),
+            )
+        else:
+            base = score(o, n, old_tokens, new_tokens)
+        if not base:
+            return 0
+        if old_count[o.domain] == 1 and new_count[n.domain] == 1:
+            base += SOLE_OF_DOMAIN_BONUS
+        if device_pairs and o.device_id and device_pairs.get(o.device_id) == n.device_id:
+            base += SAME_DEVICE_PAIR_BONUS
+        return min(100, base)
 
     candidates = sorted(
         (

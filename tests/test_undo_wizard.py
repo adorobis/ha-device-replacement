@@ -121,11 +121,15 @@ async def test_wizard_replace_and_undo(hass: HomeAssistant, devices) -> None:
     result = await flows.async_configure(result["flow_id"], {"next_step_id": "replace"})
     assert result["step_id"] == "replace"
     result = await flows.async_configure(
-        result["flow_id"], {"old_device_id": old_id, "new_device_id": old_id}
+        result["flow_id"], {"old_integration": "fakedev", "new_device_id": new_id}
+    )
+    assert result["step_id"] == "old_device"
+    result = await flows.async_configure(
+        result["flow_id"], {"old_device_id": new_id, "include_sub_devices": True}
     )
     assert result["errors"] == {"base": "same_device"}
     result = await flows.async_configure(
-        result["flow_id"], {"old_device_id": old_id, "new_device_id": new_id}
+        result["flow_id"], {"old_device_id": old_id, "include_sub_devices": True}
     )
     assert result["step_id"] == "mapping"
     schema = {str(k): k.default() for k in result["data_schema"].schema}

@@ -185,40 +185,49 @@ class Undoer:
         return tombstones
 
     def _restore_devices(self, old_device_id: str, new_device_id: str) -> None:
-        """Enable the old device again and restore the new device's settings."""
+        """Enable the old devices again and restore the new devices' settings."""
         snapshot = self.record["snapshot"]
-        old_before = snapshot["old_device"]
-        device_disabled_by = old_before["disabled_by"]
-        self.dreg.async_update_device(
-            old_device_id,
-            disabled_by=dr.DeviceEntryDisabler(device_disabled_by) if device_disabled_by else None,
-        )
-        changed = next(
-            (
-                s.get("changes", {})
-                for s in self.record["steps"]
-                if s["step"] == "device_settings_copied"
-            ),
-            {},
-        )
-        new_before = snapshot["new_device"]
-        restore: dict[str, Any] = {}
-        if "area_id" in changed:
-            restore["area_id"] = new_before["area_id"]
-        if "name_by_user" in changed:
-            restore["name_by_user"] = new_before["name_by_user"]
-        if "labels" in changed:
-            restore["labels"] = set(new_before["labels"])
-        if restore and self.dreg.async_get(new_device_id) is not None:
-            self.dreg.async_update_device(new_device_id, **restore)
-        self._step("devices_restored", new_device=sorted(restore))
+        for before in snapshot.get("old_devices") or [snapshot["old_device"]]:
+            if self.dreg.async_get(before["id"]) is None:
+                continue
+            disabled_by = before["disabled_by"]
+            self.dreg.async_update_device(
+                before["id"],
+                disabled_by=dr.DeviceEntryDisabler(disabled_by) if disabled_by else None,
+            )
+        step = self._forward_step("device_settings_copied")
+        # v0.2 records list the changes per new device; v0.1 only for the main one
+        changed_by_device = step.get("devices") or {new_device_id: step.get("changes", {})}
+        new_before = {d["id"]: d for d in snapshot.get("new_devices") or [snapshot["new_device"]]}
+        restored: dict[str, list[str]] = {}
+        for device_id, changed in changed_by_device.items():
+            before = new_before.get(device_id)
+            if before is None or self.dreg.async_get(device_id) is None:
+                continue
+            restore: dict[str, Any] = {}
+            if "area_id" in changed:
+                restore["area_id"] = before["area_id"]
+            if "name_by_user" in changed:
+                restore["name_by_user"] = before["name_by_user"]
+            if "labels" in changed:
+                restore["labels"] = set(before["labels"])
+            if restore:
+                self.dreg.async_update_device(device_id, **restore)
+                restored[device_id] = sorted(restore)
+        self._step("devices_restored", new_devices=restored)
 
     async def _async_wait_and_clean(
         self, moves: list[tuple[str, dict[str, Any]]], tombstones: list[str]
     ) -> None:
         """Wait until both devices have their entities again, then drop tombstones."""
         before = {e["entity_id"]: e for e in self.record["snapshot"]["entities"]}
-        expected = [eid for eid, original in moves if original["disabled_by"] in (None, "device")]
+        # Only entities that are enabled once the old devices are restored come back;
+        # a device that was disabled before the replacement is disabled again.
+        expected = [
+            eid
+            for eid, _ in moves
+            if (e := self.ereg.async_get(eid)) is not None and not e.disabled
+        ]
         config_entries = {o["config_entry_id"] for _, o in moves if o["config_entry_id"]}
         new_keys: list[tuple[str, str, str]] = []
         for item in self.record["migrated"]:
@@ -258,18 +267,20 @@ class Undoer:
             self._warn("The entities did not all come back; Home Assistant should be restarted")
 
     async def _async_restore_references(self, old_device_id: str, new_device_id: str) -> None:
-        """Put the old device ID back where it was rewritten; delete the issues."""
-        rewritten = next(
-            (
-                s.get("rewritten", {})
-                for s in self.record["steps"]
-                if s["step"] == "references_updated"
-            ),
-            {},
-        )
-        if rewritten:
-            counts = await async_rewrite_device_id(self.hass, new_device_id, old_device_id)
-            self._step("references_restored", rewritten=counts)
+        """Put the old device IDs back where they were rewritten; delete the issues."""
+        step = self._forward_step("references_updated")
+        # v0.2 records list the rewrites per old device; v0.1 only for the main one
+        per_device = step.get("devices")
+        if per_device is None:
+            per_device = {old_device_id: step["rewritten"]} if step.get("rewritten") else {}
+        pairs = self.record.get("device_pairs") or {old_device_id: new_device_id}
+        restored: dict[str, dict[str, int]] = {}
+        for old_id in per_device:
+            new_id = pairs.get(old_id)
+            if new_id:
+                restored[old_id] = await async_rewrite_device_id(self.hass, new_id, old_id)
+        if restored:
+            self._step("references_restored", devices=restored)
         for issue_id in self.record.get("issues", []):
             ir.async_delete_issue(self.hass, DOMAIN, issue_id)
         self._step("issues_deleted", count=len(self.record.get("issues", [])))

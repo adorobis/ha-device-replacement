@@ -26,12 +26,14 @@ from homeassistant.helpers.selector import (
     SelectSelectorConfig,
     SelectSelectorMode,
 )
+from homeassistant.loader import IntegrationNotFound, async_get_integration
 from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
 from .const import (
     ATTR_ADJUST_ENERGY,
     ATTR_FORCE,
+    ATTR_INCLUDE_SUB_DEVICES,
     ATTR_KEEP_UNITS,
     ATTR_NEW_DEVICE_ID,
     ATTR_OLD_DEVICE_ID,
@@ -39,6 +41,7 @@ from .const import (
     DOMAIN,
 )
 from .executor import NOT_FORCEABLE, Executor
+from .family import device_name
 from .journal import Journal
 from .models import Level, Plan
 from .planner import async_build_plan
@@ -46,6 +49,7 @@ from .undo import Undoer, undo_blocker
 
 NONE = "__none__"
 ATTR_RECORD_ID = "record_id"
+ATTR_OLD_INTEGRATION = "old_integration"
 _ICON = {Level.INFO: "ℹ️", Level.WARNING: "⚠️", Level.BLOCKING: "⛔"}
 
 
@@ -81,6 +85,17 @@ def plan_summary(plan: Plan) -> str:
         lines.append("")
         lines.extend(f"- {_ICON[c.level]} {c.message}" for c in plan.device_checks)
     return "\n".join(lines)
+
+
+def _unique_labels(devices: list[tuple[str, str]]) -> dict[str, str]:
+    """Return {label: device id}, the device names made unique for form fields."""
+    labels: dict[str, str] = {}
+    for device_id, name in devices:
+        label, n = name, 2
+        while label in labels:
+            label, n = f"{name} ({n})", n + 1
+        labels[label] = device_id
+    return labels
 
 
 def record_label(record: dict[str, Any]) -> str:
@@ -121,6 +136,9 @@ class ReplacementWizard(OptionsFlow):
         self._plan: Plan | None = None
         self._task: asyncio.Task[dict[str, Any]] | None = None
         self._record_id: str | None = None
+        self._old_domain: str = ""
+        self._include: bool = True
+        self._device_mapping: dict[str, str | None] = {}
 
     @property
     def _journal(self) -> Journal:
@@ -141,28 +159,156 @@ class ReplacementWizard(OptionsFlow):
     async def async_step_replace(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Pick the old and the new device."""
+        """Pick the integration of the old device, and the new device."""
+        if user_input is not None:
+            self._old_domain = user_input[ATTR_OLD_INTEGRATION]
+            self._new = user_input[ATTR_NEW_DEVICE_ID]
+            return await self.async_step_old_device()
+        dreg = dr.async_get(self.hass)
+        domains: set[str] = set()
+        for device in dreg.devices.values():
+            for entry_id in device.config_entries:
+                if entry := self.hass.config_entries.async_get_entry(entry_id):
+                    domains.add(entry.domain)
+        options = []
+        for domain in domains:
+            try:
+                name = (await async_get_integration(self.hass, domain)).name
+            except IntegrationNotFound:
+                name = domain
+            options.append(SelectOptionDict(value=domain, label=name))
+        options.sort(key=lambda o: o["label"].lower())
+        return self.async_show_form(
+            step_id="replace",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(ATTR_OLD_INTEGRATION): SelectSelector(
+                        SelectSelectorConfig(options=options, mode=SelectSelectorMode.DROPDOWN)
+                    ),
+                    vol.Required(ATTR_NEW_DEVICE_ID): DeviceSelector(),
+                }
+            ),
+        )
+
+    def _old_device_options(self) -> list[SelectOptionDict]:
+        """Devices of the chosen integration, disabled ones too, sub-devices indented."""
+        dreg = dr.async_get(self.hass)
+        devices = [
+            d
+            for d in dreg.devices.values()
+            if any(
+                (e := self.hass.config_entries.async_get_entry(entry_id)) is not None
+                and e.domain == self._old_domain
+                for entry_id in d.config_entries
+            )
+        ]
+        ids = {d.id for d in devices}
+        children: dict[str, list[dr.DeviceEntry]] = {}
+        for d in devices:
+            if d.via_device_id in ids:
+                children.setdefault(d.via_device_id, []).append(d)
+        options: list[SelectOptionDict] = []
+
+        def add(device: dr.DeviceEntry, depth: int) -> None:
+            label = ("↳ " * depth) + device_name(device)
+            if device.disabled_by:
+                label += " (disabled)"
+            if count := len(children.get(device.id, [])):
+                label += f" + {count} sub-device{'s' if count > 1 else ''}"
+            options.append(SelectOptionDict(value=device.id, label=label))
+            for child in sorted(children.get(device.id, []), key=device_name):
+                add(child, depth + 1)
+
+        for device in sorted((d for d in devices if d.via_device_id not in ids), key=device_name):
+            add(device, 0)
+        return options
+
+    async def async_step_old_device(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Pick the old device; disabled devices are listed too."""
         errors: dict[str, str] = {}
         if user_input is not None:
             self._old = user_input[ATTR_OLD_DEVICE_ID]
-            self._new = user_input[ATTR_NEW_DEVICE_ID]
-            if self._old == self._new:
+            self._include = user_input[ATTR_INCLUDE_SUB_DEVICES]
+            self._device_mapping = {}
+            self._plan = await async_build_plan(
+                self.hass, self._old, self._new, include_sub_devices=self._include
+            )
+            codes = {c.code for c in self._plan.device_checks}
+            if "same_device" in codes:
                 errors["base"] = "same_device"
+            elif "too_many_sub_devices" in codes:
+                errors["base"] = "too_many_sub_devices"
+            elif len(self._plan.old_devices) > 1 or len(self._plan.new_devices) > 1:
+                return await self.async_step_devices()
             else:
-                self._plan = await async_build_plan(self.hass, self._old, self._new)
                 return await self.async_step_mapping()
         return self.async_show_form(
-            step_id="replace",
+            step_id="old_device",
             data_schema=self.add_suggested_values_to_schema(
                 vol.Schema(
                     {
-                        vol.Required(ATTR_OLD_DEVICE_ID): DeviceSelector(),
-                        vol.Required(ATTR_NEW_DEVICE_ID): DeviceSelector(),
+                        vol.Required(ATTR_OLD_DEVICE_ID): SelectSelector(
+                            SelectSelectorConfig(
+                                options=self._old_device_options(),
+                                mode=SelectSelectorMode.DROPDOWN,
+                            )
+                        ),
+                        vol.Required(ATTR_INCLUDE_SUB_DEVICES, default=True): BooleanSelector(),
                     }
                 ),
                 user_input or {},
             ),
             errors=errors,
+            description_placeholders={"new_device": self._device_name(self._new)},
+        )
+
+    async def async_step_devices(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Pair the sub-devices of the old device with those of the new one."""
+        assert self._plan is not None
+        plan = self._plan
+        errors: dict[str, str] = {}
+        # The form fields are named after the old devices, not their IDs.
+        keys = _unique_labels(plan.old_devices)
+        if user_input is not None:
+            device_mapping = {
+                keys[label]: None if v == NONE else v for label, v in user_input.items()
+            }
+            chosen = [v for v in device_mapping.values() if v]
+            if len(chosen) != len(set(chosen)):
+                errors["base"] = "duplicate_device"
+            else:
+                self._device_mapping = device_mapping
+                self._plan = await async_build_plan(
+                    self.hass,
+                    self._old,
+                    self._new,
+                    include_sub_devices=self._include,
+                    device_mapping=device_mapping,
+                )
+                return await self.async_step_mapping()
+        new_options = [SelectOptionDict(value=NONE, label="— no counterpart —")]
+        new_options.extend(
+            SelectOptionDict(value=device_id, label=name) for device_id, name in plan.new_devices
+        )
+        schema: dict[Any, Any] = {}
+        for label, old_id in keys.items():
+            schema[vol.Required(label, default=plan.device_pairs.get(old_id) or NONE)] = (
+                SelectSelector(
+                    SelectSelectorConfig(options=new_options, mode=SelectSelectorMode.DROPDOWN)
+                )
+            )
+        return self.async_show_form(
+            step_id="devices",
+            data_schema=vol.Schema(schema),
+            errors=errors,
+            description_placeholders={
+                "old_device": plan.old_device_name,
+                "new_device": plan.new_device_name,
+            },
         )
 
     async def async_step_mapping(
@@ -181,7 +327,13 @@ class ReplacementWizard(OptionsFlow):
                 errors["base"] = "nothing_mapped"
             else:
                 self._plan = await async_build_plan(
-                    self.hass, self._old, self._new, mapping, auto_match=False
+                    self.hass,
+                    self._old,
+                    self._new,
+                    mapping,
+                    auto_match=False,
+                    include_sub_devices=self._include,
+                    device_mapping=self._device_mapping,
                 )
                 return await self.async_step_confirm()
 
@@ -192,12 +344,19 @@ class ReplacementWizard(OptionsFlow):
         new_entities = sorted(
             [p.new for p in plan.pairs] + plan.unmatched_new, key=lambda d: d.entity_id
         )
+        new_device_names = dict(plan.new_devices)
+        several = len(plan.new_devices) > 1
         schema: dict[Any, Any] = {}
         for old in old_entities:
             options = [SelectOptionDict(value=NONE, label="— don't carry over —")]
             options.extend(
                 SelectOptionDict(
-                    value=n.entity_id, label=f"{n.name or n.entity_id} ({n.entity_id})"
+                    value=n.entity_id,
+                    label=(
+                        f"{n.name or n.entity_id}"
+                        + (f" — {new_device_names.get(n.device_id or '', '')}" if several else "")
+                        + f" ({n.entity_id})"
+                    ),
                 )
                 for n in new_entities
                 if n.domain == old.domain

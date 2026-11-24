@@ -19,8 +19,10 @@ import voluptuous as vol
 from .const import (
     ATTR_ADJUST_ENERGY,
     ATTR_AUTO_MATCH,
+    ATTR_DEVICE_MAPPING,
     ATTR_DRY_RUN,
     ATTR_FORCE,
+    ATTR_INCLUDE_SUB_DEVICES,
     ATTR_KEEP_UNITS,
     ATTR_MAPPING,
     ATTR_NEW_DEVICE_ID,
@@ -47,6 +49,10 @@ PLAN_SCHEMA = vol.Schema(
         vol.Required(ATTR_NEW_DEVICE_ID): cv.string,
         vol.Optional(ATTR_MAPPING, default={}): _MAPPING,
         vol.Optional(ATTR_AUTO_MATCH, default=True): cv.boolean,
+        vol.Optional(ATTR_INCLUDE_SUB_DEVICES, default=True): cv.boolean,
+        vol.Optional(ATTR_DEVICE_MAPPING, default={}): vol.Schema(
+            {cv.string: vol.Any(None, cv.string)}
+        ),
     }
 )
 
@@ -75,6 +81,8 @@ async def _plan(hass: HomeAssistant, data: dict[str, Any]):
         data[ATTR_NEW_DEVICE_ID],
         data[ATTR_MAPPING],
         data[ATTR_AUTO_MATCH],
+        include_sub_devices=data[ATTR_INCLUDE_SUB_DEVICES],
+        device_mapping=data[ATTR_DEVICE_MAPPING],
     )
 
 

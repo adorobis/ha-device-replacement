@@ -16,6 +16,14 @@ plan:
       default: true
       selector:
         boolean: {}
+    include_sub_devices:
+      default: true
+      selector:
+        boolean: {}
+    device_mapping:
+      example: '{"<old sub-device id>": "<new sub-device id>"}'
+      selector:
+        object: {}
 
 execute:
   fields:
@@ -35,6 +43,14 @@ execute:
       default: true
       selector:
         boolean: {}
+    include_sub_devices:
+      default: true
+      selector:
+        boolean: {}
+    device_mapping:
+      example: '{"<old sub-device id>": "<new sub-device id>"}'
+      selector:
+        object: {}
     keep_units:
       default: true
       selector:

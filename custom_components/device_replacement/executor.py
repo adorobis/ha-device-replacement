@@ -43,6 +43,7 @@ from .const import (
     TOMBSTONE_SUFFIX,
     UNLOAD_TIMEOUT,
 )
+from .family import device_name
 from .journal import Journal
 from .models import EntityPair, Plan
 from .references import Reference, async_find_references, async_rewrite_device_id
@@ -179,9 +180,20 @@ class Executor:
                 "force": self.force,
             },
             plan=self.plan.as_dict(),
+            device_pairs=dict(self.plan.device_pairs),
             snapshot={
                 "old_device": _device_snapshot(old_device),
                 "new_device": _device_snapshot(new_device),
+                "old_devices": [
+                    _device_snapshot(d)
+                    for device_id, _ in self.plan.old_devices
+                    if (d := self.dreg.async_get(device_id)) is not None
+                ],
+                "new_devices": [
+                    _device_snapshot(d)
+                    for device_id, _ in self.plan.new_devices
+                    if (d := self.dreg.async_get(device_id)) is not None
+                ],
                 "entities": [_entry_snapshot(e) for e in entries if e is not None],
             },
         )
@@ -221,11 +233,13 @@ class Executor:
 
         meters = await self._async_meter_readings(pairs)
 
-        # 1. retire the old device
-        old_device = self.dreg.async_get(self.plan.old_device_id)
-        assert old_device is not None
-        if old_device.disabled_by is None:
-            self.dreg.async_update_device(old_device.id, disabled_by=dr.DeviceEntryDisabler.USER)
+        # 1. retire the old device and its sub-devices
+        for device_id, _ in self.plan.old_devices:
+            old_device = self.dreg.async_get(device_id)
+            if old_device is not None and old_device.disabled_by is None:
+                self.dreg.async_update_device(
+                    old_device.id, disabled_by=dr.DeviceEntryDisabler.USER
+                )
         if not await _wait_until(lambda: not _loaded(self.hass, all_old), UNLOAD_TIMEOUT):
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
@@ -347,22 +361,30 @@ class Executor:
         self.record["migrated"].append(item)
 
     def _copy_device_settings(self) -> None:
-        old = self.dreg.async_get(self.plan.old_device_id)
-        new = self.dreg.async_get(self.plan.new_device_id)
-        assert old is not None and new is not None
-        changes: dict[str, Any] = {}
-        if old.area_id and not new.area_id:
-            changes["area_id"] = old.area_id
-        if old.name_by_user and not new.name_by_user:
-            changes["name_by_user"] = old.name_by_user
-        if old.labels - new.labels:
-            changes["labels"] = old.labels | new.labels
-        if changes:
-            self.dreg.async_update_device(new.id, **changes)
+        """Copy area, custom name and labels to each paired new device."""
+        per_device: dict[str, dict[str, Any]] = {}
+        for old_id, new_id in self.plan.device_pairs.items():
+            old = self.dreg.async_get(old_id)
+            new = self.dreg.async_get(new_id) if new_id else None
+            if old is None or new is None:
+                continue
+            changes: dict[str, Any] = {}
+            if old.area_id and not new.area_id:
+                changes["area_id"] = old.area_id
+            if old.name_by_user and not new.name_by_user:
+                changes["name_by_user"] = old.name_by_user
+            if old.labels - new.labels:
+                changes["labels"] = old.labels | new.labels
+            if changes:
+                self.dreg.async_update_device(new.id, **changes)
+                per_device[new.id] = {
+                    k: sorted(v) if isinstance(v, set) else v for k, v in changes.items()
+                }
         Journal.step(
             self.record,
             "device_settings_copied",
-            changes={k: sorted(v) if isinstance(v, set) else v for k, v in changes.items()},
+            changes=per_device.get(self.plan.new_device_id, {}),
+            devices=per_device,
         )
 
     async def _async_wait_for_reload(self, expected: list[str], config_entry_ids: set[str]) -> bool:
@@ -409,14 +431,24 @@ class Executor:
         Journal.step(self.record, "tombstones_removed", entities=removed)
 
     async def _async_update_references(self) -> list[Reference]:
-        """Point device references at the new device; return what could not be."""
-        old, new = self.plan.old_device_id, self.plan.new_device_id
-        rewritten = await async_rewrite_device_id(self.hass, old, new)
-        leftover = await async_find_references(self.hass, [], [old])
+        """Point device references at the paired new devices; return what could not be."""
+        rewritten: dict[str, int] = {}
+        per_device: dict[str, dict[str, int]] = {}
+        for old_id, new_id in self.plan.device_pairs.items():
+            if new_id is None:
+                continue
+            counts = await async_rewrite_device_id(self.hass, old_id, new_id)
+            if counts:
+                per_device[old_id] = counts
+                for where, count in counts.items():
+                    rewritten[where] = rewritten.get(where, 0) + count
+        old_ids = [device_id for device_id, _ in self.plan.old_devices]
+        leftover = await async_find_references(self.hass, [], old_ids)
         Journal.step(
             self.record,
             "references_updated",
             rewritten=rewritten,
+            devices=per_device,
             not_rewritten=[r.as_dict() for r in leftover],
         )
         for ref in leftover:
@@ -437,7 +469,17 @@ class Executor:
         )
 
     async def _async_remove_old_device(self) -> None:
-        device = self.dreg.async_get(self.plan.old_device_id)
+        # sub-devices first, the main device last
+        for device_id, _ in reversed(self.plan.old_devices):
+            await self._async_remove_device(device_id)
+        Journal.step(
+            self.record,
+            "old_device_removed",
+            removed=self.dreg.async_get(self.plan.old_device_id) is None,
+        )
+
+    async def _async_remove_device(self, device_id: str) -> None:
+        device = self.dreg.async_get(device_id)
         if device is None:
             return
         for entry_id in list(device.config_entries):
@@ -448,16 +490,9 @@ class Executor:
             component = await integration.async_get_component()
             remove = getattr(component, "async_remove_config_entry_device", None)
             if remove is None or not await remove(self.hass, config_entry, device):
-                self._warn(
-                    f"{config_entry.title} does not allow removing {self.plan.old_device_name}"
-                )
+                self._warn(f"{config_entry.title} does not allow removing {device_name(device)}")
                 continue
             self.dreg.async_update_device(device.id, remove_config_entry_id=entry_id)
-        Journal.step(
-            self.record,
-            "old_device_removed",
-            removed=self.dreg.async_get(self.plan.old_device_id) is None,
-        )
 
     def _schedule_sum_adjustments(self, meters: dict[str, tuple[float, str]]) -> None:
         for pair in self.plan.pairs:

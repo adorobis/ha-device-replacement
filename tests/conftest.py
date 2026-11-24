@@ -48,12 +48,21 @@ class FakeDevice:
     entities: list[dict[str, Any]]
     online: bool = True
     values: dict[str, Any] = field(default_factory=dict)
+    main_device_id: str | None = None
 
 
 DEVICES: dict[str, FakeDevice] = {}
 
 
-def _info(dev: FakeDevice) -> DeviceInfo:
+def _info(dev: FakeDevice, spec: dict[str, Any] | None = None) -> DeviceInfo:
+    """Main device, or the sub-device a spec names with "sub" (like a Shelly channel)."""
+    if spec and (sub := spec.get("sub")):
+        return DeviceInfo(
+            identifiers={(FAKE, f"{dev.serial}-{sub}")},
+            name=spec.get("sub_name", sub),
+            manufacturer="Fake",
+            via_device_id=dev.main_device_id,
+        )
     return DeviceInfo(identifiers={(FAKE, dev.serial)}, name=dev.name, manufacturer="Fake")
 
 
@@ -66,12 +75,12 @@ class FakeSensor(SensorEntity):
         """Initialise from a spec."""
         self._dev, self._key = dev, spec["key"]
         self._attr_unique_id = f"{dev.serial}_{spec['key']}"
-        self._attr_name = spec["name"]
+        self._attr_name = spec.get("name")
         self._attr_device_class = spec.get("device_class")
         self._attr_native_unit_of_measurement = spec.get("unit")
         self._attr_state_class = spec.get("state_class")
         self._attr_translation_key = spec.get("translation_key")
-        self._attr_device_info = _info(dev)
+        self._attr_device_info = _info(dev, spec)
 
     @property
     def available(self) -> bool:
@@ -93,8 +102,8 @@ class FakeSwitch(SwitchEntity):
         """Initialise from a spec."""
         self._dev, self._key = dev, spec["key"]
         self._attr_unique_id = f"{dev.serial}_{spec['key']}"
-        self._attr_name = spec["name"]
-        self._attr_device_info = _info(dev)
+        self._attr_name = spec.get("name")
+        self._attr_device_info = _info(dev, spec)
 
     @property
     def available(self) -> bool:
@@ -112,6 +121,17 @@ def _platform(domain: str, cls: type) -> MockPlatform:
         hass: HomeAssistant, entry: ConfigEntry, add: AddConfigEntryEntitiesCallback
     ) -> None:
         dev = DEVICES[entry.data["serial"]]
+        # Sub-devices point at the main device by id, as Shelly does.
+        dev.main_device_id = (
+            dr.async_get(hass)
+            .async_get_or_create(
+                config_entry_id=entry.entry_id,
+                identifiers={(FAKE, dev.serial)},
+                name=dev.name,
+                manufacturer="Fake",
+            )
+            .id
+        )
         add([cls(dev, s) for s in dev.entities if s["domain"] == domain])
 
     return MockPlatform(async_setup_entry=setup)

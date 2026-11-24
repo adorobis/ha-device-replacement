@@ -82,6 +82,11 @@ class Plan:
     device_checks: list[Check]
     references: list[Reference] = field(default_factory=list)
     device_automations: list[DeviceAutomationUse] = field(default_factory=list)
+    # Devices of both families, (id, name), main device first.
+    old_devices: list[tuple[str, str]] = field(default_factory=list)
+    new_devices: list[tuple[str, str]] = field(default_factory=list)
+    # Old device id → paired new device id (None: no counterpart).
+    device_pairs: dict[str, str | None] = field(default_factory=dict)
 
     @property
     def blocking(self) -> list[Check]:
@@ -115,6 +120,15 @@ class Plan:
             "old_device": {"id": self.old_device_id, "name": self.old_device_name},
             "new_device": {"id": self.new_device_id, "name": self.new_device_name},
             "can_execute": self.can_execute,
+            "devices": [
+                {
+                    "old": old_id,
+                    "old_name": old_name,
+                    "new": self.device_pairs.get(old_id),
+                    "new_name": dict(self.new_devices).get(self.device_pairs.get(old_id) or ""),
+                }
+                for old_id, old_name in self.old_devices
+            ],
             "pairs": [
                 {
                     "old": p.old.entity_id,

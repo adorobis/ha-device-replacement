@@ -67,6 +67,8 @@ class DeviceAutomationUse:
     type: str
     subtype: str | None
     supported: bool
+    # Another device of the new family that offers it, when the paired one does not.
+    offered_on: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dict."""
@@ -78,6 +80,7 @@ class DeviceAutomationUse:
             "type": self.type,
             "subtype": self.subtype,
             "supported": self.supported,
+            "offered_on": self.offered_on,
         }
 
 
@@ -195,10 +198,14 @@ def _walk(node: Any, section: str) -> Iterator[tuple[str, dict[str, Any]]]:
 async def async_device_automation_uses(
     hass: HomeAssistant,
     old_device_id: str,
-    new_device_id: str,
+    new_device_id: str | None,
     mapped_registry_ids: dict[str, str],
+    new_family_ids: list[str] | None = None,
 ) -> list[DeviceAutomationUse]:
     """Return the integration-specific device automations of the old device.
+
+    They are checked against the paired new device (None: it has no counterpart).
+    When another device of the new family offers the same one, offered_on says which.
 
     Entity-based ones (they carry the entity's registry id) keep working for mapped
     entities and are skipped; mapped_registry_ids maps registry ids of mapped old
@@ -217,18 +224,22 @@ async def async_device_automation_uses(
     component = hass.data.get(DATA_COMPONENT)
     if component is None:
         return uses
-    offered: dict[str, set[tuple[str, str, str | None]]] = {}
+    candidates = list(dict.fromkeys([*([new_device_id] if new_device_id else []),
+                                     *(new_family_ids or [])]))  # fmt: skip
+    # section → device id → offered (domain, type, subtype)
+    offered: dict[str, dict[str, set[tuple[str, str, str | None]]]] = {}
     for section, kind in (
         ("trigger", DeviceAutomationType.TRIGGER),
         ("condition", DeviceAutomationType.CONDITION),
         ("action", DeviceAutomationType.ACTION),
     ):
         try:
-            found = await async_get_device_automations(hass, kind, [new_device_id])
+            found = await async_get_device_automations(hass, kind, candidates) if candidates else {}
         except HomeAssistantError:
             found = {}
         offered[section] = {
-            (a.get("domain"), a.get("type"), a.get("subtype")) for a in found.get(new_device_id, [])
+            device_id: {(a.get("domain"), a.get("type"), a.get("subtype")) for a in items}
+            for device_id, items in found.items()
         }
     for automation_id in automation.automations_with_device(hass, old_device_id):
         entity = component.get_entity(automation_id)
@@ -244,6 +255,22 @@ async def async_device_automation_uses(
             if entity_ref and entity_ref in mapped_registry_ids:
                 continue  # entity-based, the entity was mapped: keeps working
             key = (node["domain"], node["type"], node.get("subtype"))
+            by_device = offered[section]
+            supported = (
+                not entity_ref
+                and new_device_id is not None
+                and key in by_device.get(new_device_id, set())
+            )
+            offered_on = None
+            if not supported and not entity_ref:
+                offered_on = next(
+                    (
+                        d
+                        for d in candidates
+                        if d != new_device_id and key in by_device.get(d, set())
+                    ),
+                    None,
+                )
             uses.append(
                 DeviceAutomationUse(
                     automation=automation_id,
@@ -252,7 +279,8 @@ async def async_device_automation_uses(
                     domain=node["domain"],
                     type=node["type"],
                     subtype=node.get("subtype"),
-                    supported=key in offered[section] and not entity_ref,
+                    supported=supported,
+                    offered_on=offered_on,
                 )
             )
     return uses

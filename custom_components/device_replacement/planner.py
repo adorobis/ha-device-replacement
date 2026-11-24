@@ -12,6 +12,7 @@ from homeassistant.helpers.entity import entity_sources
 
 from .compat import check_pair
 from .const import DOMAIN, MATCH_THRESHOLD, TOMBSTONE_SUFFIX
+from .family import MAX_FAMILY_SIZE, device_name, family, name_tokens_by_device, pair_devices
 from .matcher import match, score
 from .models import Check, EntityDescriptor, EntityPair, Level, Plan
 from .references import async_device_automation_uses, async_find_references, registry_ids
@@ -55,10 +56,6 @@ def device_entities(hass: HomeAssistant, device_id: str) -> list[er.RegistryEntr
     ]
 
 
-def _device_name(device: dr.DeviceEntry) -> str:
-    return device.name_by_user or device.name or device.id
-
-
 def _get_device(hass: HomeAssistant, device_id: str) -> dr.DeviceEntry:
     device = dr.async_get(hass).async_get(device_id)
     if device is None:
@@ -70,32 +67,91 @@ def _get_device(hass: HomeAssistant, device_id: str) -> dr.DeviceEntry:
     return device
 
 
+def _device_checks(
+    old_family: list[dr.DeviceEntry],
+    new_family: list[dr.DeviceEntry],
+    device_mapping: Mapping[str, str | None],
+) -> list[Check]:
+    checks: list[Check] = []
+    old_ids = {d.id for d in old_family}
+    new_ids = {d.id for d in new_family}
+    if old_ids & new_ids:
+        checks.append(
+            Check(Level.BLOCKING, "same_device", "Old and new device are the same device")
+        )
+    for side, devices in (("old", old_family), ("new", new_family)):
+        if len(devices) > MAX_FAMILY_SIZE:
+            checks.append(
+                Check(
+                    Level.BLOCKING,
+                    "too_many_sub_devices",
+                    f"{device_name(devices[0])} has {len(devices) - 1} sub-devices, like a "
+                    "hub; pick the device itself, or leave out the sub-devices",
+                    {"side": side, "sub_devices": len(devices) - 1},
+                )
+            )
+    seen: set[str] = set()
+    for old_id, new_id in device_mapping.items():
+        if old_id not in old_ids:
+            checks.append(
+                Check(
+                    Level.BLOCKING,
+                    "device_mapping_unknown_old",
+                    f"Device {old_id} is not part of the old device",
+                    {"device_id": old_id},
+                )
+            )
+        if new_id is not None and new_id not in new_ids:
+            checks.append(
+                Check(
+                    Level.BLOCKING,
+                    "device_mapping_unknown_new",
+                    f"Device {new_id} is not part of the new device",
+                    {"device_id": new_id},
+                )
+            )
+        if new_id is not None and new_id in seen:
+            checks.append(
+                Check(
+                    Level.BLOCKING,
+                    "device_mapping_duplicate_new",
+                    f"Device {new_id} is paired more than once",
+                    {"device_id": new_id},
+                )
+            )
+        if new_id is not None:
+            seen.add(new_id)
+    return checks
+
+
 def build_plan(
     hass: HomeAssistant,
     old_device_id: str,
     new_device_id: str,
     mapping: Mapping[str, str | None] | None = None,
     auto_match: bool = True,
+    *,
+    include_sub_devices: bool = True,
+    device_mapping: Mapping[str, str | None] | None = None,
 ) -> Plan:
     """Return the plan for replacing old_device_id with new_device_id.
 
+    Both devices come with their sub-devices unless include_sub_devices is False.
     mapping maps old entity_ids to new entity_ids; None leaves an old entity
     unmapped. Old entities missing from mapping are matched automatically unless
-    auto_match is False.
+    auto_match is False. device_mapping overrides the pairing of sub-devices.
     """
-    old_device = _get_device(hass, old_device_id)
-    new_device = _get_device(hass, new_device_id)
-    old_name, new_name = _device_name(old_device), _device_name(new_device)
-    device_checks: list[Check] = []
+    _get_device(hass, old_device_id)
+    _get_device(hass, new_device_id)
+    old_family = family(hass, old_device_id, include_sub_devices)
+    new_family = family(hass, new_device_id, include_sub_devices)
+    old_name, new_name = device_name(old_family[0]), device_name(new_family[0])
+    device_mapping = dict(device_mapping or {})
+    device_checks = _device_checks(old_family, new_family, device_mapping)
+    device_pairs = pair_devices(old_family, new_family) | device_mapping
 
-    if old_device_id == new_device_id:
-        device_checks.append(
-            Check(Level.BLOCKING, "same_device", "Old and new device are the same device")
-        )
-
-    old = {e.entity_id: describe(hass, e) for e in device_entities(hass, old_device_id)}
-    new = {e.entity_id: describe(hass, e) for e in device_entities(hass, new_device_id)}
-
+    old = {e.entity_id: describe(hass, e) for d in old_family for e in device_entities(hass, d.id)}
+    new = {e.entity_id: describe(hass, e) for d in new_family for e in device_entities(hass, d.id)}
     online = sorted(d.entity_id for d in old.values() if d.loaded and d.available)
     if online:
         device_checks.append(
@@ -174,7 +230,14 @@ def build_plan(
     if auto_match:
         rest_old = [d for k, d in old.items() if k not in mapping]
         rest_new = [d for k, d in new.items() if k not in used_new]
-        for o, n, points in match(rest_old, rest_new, MATCH_THRESHOLD, old_name, new_name):
+        words = name_tokens_by_device(old_family + new_family)
+        for o, n, points in match(
+            rest_old,
+            rest_new,
+            MATCH_THRESHOLD,
+            device_tokens=words,
+            device_pairs=device_pairs,
+        ):
             used_new.add(n.entity_id)
             pairs.append(EntityPair(o, n, points, "auto", check_pair(o, n)))
 
@@ -189,6 +252,9 @@ def build_plan(
         unmatched_old=[d for k, d in sorted(old.items()) if k not in paired_old],
         unmatched_new=[d for k, d in sorted(new.items()) if k not in used_new],
         device_checks=device_checks,
+        old_devices=[(d.id, device_name(d)) for d in old_family],
+        new_devices=[(d.id, device_name(d)) for d in new_family],
+        device_pairs=device_pairs,
     )
 
 
@@ -198,11 +264,23 @@ async def async_build_plan(
     new_device_id: str,
     mapping: Mapping[str, str | None] | None = None,
     auto_match: bool = True,
+    *,
+    include_sub_devices: bool = True,
+    device_mapping: Mapping[str, str | None] | None = None,
 ) -> Plan:
-    """Return the plan, with what refers to the old device and its unmapped entities."""
-    plan = build_plan(hass, old_device_id, new_device_id, mapping, auto_match)
+    """Return the plan, with what refers to the old devices and unmapped entities."""
+    plan = build_plan(
+        hass,
+        old_device_id,
+        new_device_id,
+        mapping,
+        auto_match,
+        include_sub_devices=include_sub_devices,
+        device_mapping=device_mapping,
+    )
     unmapped = [d.entity_id for d in plan.unmatched_old]
-    plan.references = await async_find_references(hass, unmapped, [old_device_id])
+    old_ids = [device_id for device_id, _ in plan.old_devices]
+    plan.references = await async_find_references(hass, unmapped, old_ids)
     for eid in unmapped:
         used = [r for r in plan.references if r.target == eid]
         if used:
@@ -216,19 +294,25 @@ async def async_build_plan(
                 )
             )
     mapped = registry_ids(hass, [p.old.entity_id for p in plan.pairs])
-    plan.device_automations = await async_device_automation_uses(
-        hass, old_device_id, new_device_id, mapped
-    )
+    new_ids = [device_id for device_id, _ in plan.new_devices]
+    new_names = dict(plan.new_devices)
+    for old_id, new_id in plan.device_pairs.items():
+        plan.device_automations.extend(
+            await async_device_automation_uses(hass, old_id, new_id, mapped, new_ids)
+        )
     for use in plan.device_automations:
         if not use.supported:
-            plan.device_checks.append(
-                Check(
-                    Level.WARNING,
-                    "device_automation_unsupported",
-                    f"{use.name} uses the device {use.section} {use.type}"
-                    + (f" ({use.subtype})" if use.subtype else "")
-                    + f", which {plan.new_device_name} does not offer",
-                    use.as_dict(),
+            what = f"{use.name} uses the device {use.section} {use.type}" + (
+                f" ({use.subtype})" if use.subtype else ""
+            )
+            if use.offered_on:
+                message = (
+                    f"{what}; {new_names.get(use.offered_on, use.offered_on)} offers it, "
+                    "pick it there after the replacement"
                 )
+            else:
+                message = f"{what}, which {plan.new_device_name} does not offer"
+            plan.device_checks.append(
+                Check(Level.WARNING, "device_automation_unsupported", message, use.as_dict())
             )
     return plan

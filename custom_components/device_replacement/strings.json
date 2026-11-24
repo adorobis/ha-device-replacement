@@ -74,6 +74,14 @@
         "remove_old_device": {
           "description": "Remove the old device afterwards, if its integration allows it.",
           "name": "Remove old device"
+        },
+        "include_sub_devices": {
+          "name": "Include sub-devices",
+          "description": "Replace the device together with its sub-devices (such as the channels of a Shelly), mapping the entities of all of them."
+        },
+        "device_mapping": {
+          "name": "Sub-device pairing",
+          "description": "Old sub-device ID to new sub-device ID, to override the automatic pairing; null for no counterpart."
         }
       },
       "name": "Replace device"
@@ -100,6 +108,14 @@
         "old_device_id": {
           "description": "The device being replaced.",
           "name": "Old device"
+        },
+        "include_sub_devices": {
+          "name": "Include sub-devices",
+          "description": "Replace the device together with its sub-devices (such as the channels of a Shelly), mapping the entities of all of them."
+        },
+        "device_mapping": {
+          "name": "Sub-device pairing",
+          "description": "Old sub-device ID to new sub-device ID, to override the automatic pairing; null for no counterpart."
         }
       },
       "name": "Plan replacement"
@@ -161,9 +177,9 @@
       },
       "replace": {
         "title": "Replace a device",
-        "description": "Pick the device that broke and the device taking its place. The old device should be offline.",
+        "description": "Pick the integration of the device that broke, and the device taking its place. The next step lists the old integration's devices, disabled ones too.",
         "data": {
-          "old_device_id": "Old device",
+          "old_integration": "Integration of the old device",
           "new_device_id": "New device"
         }
       },
@@ -193,6 +209,21 @@
         "data": {
           "record_id": "Replacement"
         }
+      },
+      "old_device": {
+        "title": "Old device",
+        "description": "Pick the device that {new_device} replaces. It should be offline or disabled.",
+        "data": {
+          "old_device_id": "Old device",
+          "include_sub_devices": "Include sub-devices"
+        },
+        "data_description": {
+          "include_sub_devices": "Some integrations split a device into a main device and sub-devices (a Shelly with one device per channel). Replace them together, so an entity can move to whichever sub-device holds it on the new device."
+        }
+      },
+      "devices": {
+        "title": "Pair sub-devices",
+        "description": "Pick the device of {new_device} that takes over each device of {old_device}. Area, name and device references go to the paired device; entities are mapped in the next step, across all of them."
       }
     },
     "progress": {
@@ -209,7 +240,9 @@
       "same_device": "Pick two different devices.",
       "duplicate_new": "A new entity can take over only one old entity.",
       "nothing_mapped": "Map at least one entity.",
-      "blocked": "{reasons}"
+      "blocked": "{reasons}",
+      "duplicate_device": "A new device can take over only one old device.",
+      "too_many_sub_devices": "That device has many sub-devices, like a hub. Pick the device itself, or switch off “Include sub-devices”."
     }
   }
 }

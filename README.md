@@ -5,10 +5,10 @@ their entity IDs, history, long-term statistics, names, icons, areas and display
 and move to the new device. Automations, scripts, dashboards and the Energy dashboard
 keep working without edits.
 
-> Status: **0.1.0**: engine, actions, reference rewriting, Repairs issues, undo and a
-> UI wizard. Tested on
-> Home Assistant 2026.11 with MQTT devices and in tests with one config entry per
-> device (Shelly-like).
+> Status: **0.2.0**: engine, actions, reference rewriting, Repairs issues, undo, a UI
+> wizard, and devices with sub-devices. Tested on Home Assistant 2026.11 with MQTT
+> devices, and in tests with one config entry per device and with the registry data of
+> a real Shelly 2.5 → Shelly Plus 2PM swap.
 
 ## How it works
 
@@ -77,15 +77,30 @@ resumed after a restart.
 Add the integration (Settings → Devices & services → Add integration → Device
 Replacement), then open it and choose **Configure**:
 
-1. **Replace a device**: pick the old (broken) and the new device.
-2. **Map entities**: every old entity gets a dropdown with the suggested new entity,
+1. **Replace a device**: pick the integration of the old device, and the new device.
+2. **Old device**: the integration's devices, **disabled ones too** (disabling a flaky
+   device first is fine), with sub-devices indented. Keep "Include sub-devices" on.
+3. **Pair sub-devices** (only when there are any): which new sub-device takes over
+   each old one; suggested by name.
+4. **Map entities**: every old entity gets a dropdown with the suggested new entity,
    or "don't carry over".
-3. **Review**: the mapping with its checks, what is not carried over, and the options
+5. **Review**: the mapping with its checks, what is not carried over, and the options
    (keep units, correct meter sums, remove the old device, force).
-4. The replacement runs with a progress screen (up to a minute while the new device's
+6. The replacement runs with a progress screen (up to a minute while the new device's
    integration reloads) and ends with a summary.
 
 **Undo a replacement** in the same menu lists the replacements that can be undone.
+
+### Devices with sub-devices
+
+Some integrations split one physical device into a main device and sub-devices: a
+Shelly 2.5 or Plus 2PM is a main device plus one device per channel. Such a family is
+replaced as one. Entities are mapped across all its devices, because the new device may
+keep an entity on another sub-device (the Plus 2PM has its button event on the main
+device, the 2.5 on the channel). Sub-devices are paired by the words that set their
+names apart within the family ("schowek old" ↔ "schowek"), then in order. Area, custom
+name, labels and device references go to the paired sub-device. A device with more than
+12 sub-devices looks like a hub and is refused; pick the device itself.
 
 ## Undo
 

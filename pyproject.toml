@@ -23,3 +23,4 @@ source = ["custom_components/device_replacement"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["PLR0915"]
+"tests/test_real_shelly.py" = ["E501"]  # registry data table
