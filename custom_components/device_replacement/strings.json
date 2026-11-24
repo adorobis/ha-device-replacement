@@ -72,7 +72,7 @@
           "name": "Old device"
         },
         "remove_old_device": {
-          "description": "Remove the old device afterwards, if its integration allows it.",
+          "description": "Remove the old device afterwards, or its integration entry when the integration can't remove a single device and the entry holds nothing else.",
           "name": "Remove old device"
         },
         "include_sub_devices": {
@@ -199,7 +199,7 @@
         "data_description": {
           "keep_units": "Keep showing sensors in the old unit when the new device reports another unit that converts (kW instead of W).",
           "adjust_energy": "Shift the statistics sum of meters so the swap does not count as consumption.",
-          "remove_old_device": "Removing the old device makes the replacement impossible to undo.",
+          "remove_old_device": "Integrations that can't remove a single device (such as Shelly) have their entry for the old device deleted instead, when it holds nothing else. Removing the old device makes the replacement impossible to undo.",
           "force": "For example when the integration never marks a dead device unavailable."
         }
       },

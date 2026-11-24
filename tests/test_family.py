@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from homeassistant import loader
 from homeassistant.components.lovelace import LOVELACE_DATA
 from homeassistant.config_entries import ConfigEntryDisabler
 from homeassistant.core import HomeAssistant
@@ -255,3 +256,45 @@ async def test_undo_keeps_disabled_old_devices_disabled(hass: HomeAssistant, she
     assert entry.unique_id == "old25_relay0"
     assert entry.disabled_by is er.RegistryEntryDisabler.DEVICE
     assert er.async_get(hass).async_get("switch.kotlownia").unique_id == "plus_switch0"
+
+
+def _without_removal_hook(hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the fake integration behave like Shelly: devices can't be removed alone."""
+    module = hass.data[loader.DATA_COMPONENTS][FAKE]
+    monkeypatch.delattr(module, "async_remove_config_entry_device")
+
+
+async def test_remove_old_device_deletes_its_entry(
+    hass: HomeAssistant, shellys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The old integration entry holds only the old devices: it is deleted."""
+    old_entry, _ = shellys
+    _without_removal_hook(hass, monkeypatch)
+    record = await _call(hass, "execute", adjust_energy=False, remove_old_device=True)
+    assert record["status"] == "done", record
+    assert record["warnings"] == []
+    step = next(s for s in record["steps"] if s["step"] == "old_device_removed")
+    assert step == step | {"removed": True, "removed_integration_entries": ["Kotłownia old"]}
+    assert hass.config_entries.async_get_entry(old_entry.entry_id) is None
+    # The migrated entities belong to the new entry and stay.
+    assert hass.states.get("switch.kotlownia_old").state == "on"
+    assert er.async_get(hass).async_get("sensor.kotlownia_old_device_temperature") is None
+
+
+async def test_remove_old_device_keeps_shared_entry(
+    hass: HomeAssistant, shellys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An entry that holds other devices too is kept, with a clear warning."""
+    old_entry, _ = shellys
+    _without_removal_hook(hass, monkeypatch)
+    dr.async_get(hass).async_get_or_create(
+        config_entry_id=old_entry.entry_id, identifiers={(FAKE, "other")}, name="Garage"
+    )
+    record = await _call(hass, "execute", adjust_energy=False, remove_old_device=True)
+    assert record["status"] == "done", record
+    assert record["warnings"] == [
+        "The fakedev integration cannot remove schowek old, kotlownia old, Kotłownia old on "
+        "its own, and its entry “Kotłownia old” also holds Garage; remove the old device by "
+        "hand"
+    ]
+    assert hass.config_entries.async_get_entry(old_entry.entry_id) is not None

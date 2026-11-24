@@ -32,7 +32,7 @@ from homeassistant.helpers.event import (
     async_track_point_in_utc_time,
     async_track_state_change_event,
 )
-from homeassistant.loader import async_get_integration
+from homeassistant.loader import IntegrationNotFound, async_get_integration
 from homeassistant.util import dt as dt_util
 
 from .compat import SUM_STATE_CLASSES, unit_converter, units_compatible
@@ -469,30 +469,79 @@ class Executor:
         )
 
     async def _async_remove_old_device(self) -> None:
+        """Remove the old devices, or the integration entry that holds only them.
+
+        Integrations that let a device be removed on its own do so through
+        async_remove_config_entry_device. Others, like Shelly, remove a device only
+        with its integration entry; that entry is deleted when it holds nothing but
+        the old devices.
+        """
+        refused: dict[str, list[str]] = {}  # config entry id → device names
         # sub-devices first, the main device last
         for device_id, _ in reversed(self.plan.old_devices):
-            await self._async_remove_device(device_id)
+            device = self.dreg.async_get(device_id)
+            if device is None:
+                continue
+            for entry_id in list(device.config_entries):
+                if not await self._async_remove_device_from_entry(device, entry_id):
+                    refused.setdefault(entry_id, []).append(device_name(device))
+        removed_entries: list[str] = []
+        for entry_id, names in refused.items():
+            config_entry = self.hass.config_entries.async_get_entry(entry_id)
+            if config_entry is None:
+                continue
+            integration = await self._async_integration_name(config_entry.domain)
+            others = self._other_content(entry_id)
+            if others:
+                self._warn(
+                    f"The {integration} integration cannot remove {', '.join(names)} on "
+                    f"its own, and its entry “{config_entry.title}” also holds "
+                    f"{', '.join(others[:3])}{' …' if len(others) > 3 else ''}; remove "
+                    "the old device by hand"
+                )
+                continue
+            await self.hass.config_entries.async_remove(entry_id)
+            removed_entries.append(config_entry.title)
         Journal.step(
             self.record,
             "old_device_removed",
             removed=self.dreg.async_get(self.plan.old_device_id) is None,
+            removed_integration_entries=removed_entries,
         )
 
-    async def _async_remove_device(self, device_id: str) -> None:
-        device = self.dreg.async_get(device_id)
-        if device is None:
-            return
-        for entry_id in list(device.config_entries):
-            config_entry = self.hass.config_entries.async_get_entry(entry_id)
-            if config_entry is None:
-                continue
-            integration = await async_get_integration(self.hass, config_entry.domain)
-            component = await integration.async_get_component()
-            remove = getattr(component, "async_remove_config_entry_device", None)
-            if remove is None or not await remove(self.hass, config_entry, device):
-                self._warn(f"{config_entry.title} does not allow removing {device_name(device)}")
-                continue
-            self.dreg.async_update_device(device.id, remove_config_entry_id=entry_id)
+    async def _async_integration_name(self, domain: str) -> str:
+        try:
+            return (await async_get_integration(self.hass, domain)).name
+        except IntegrationNotFound:
+            return domain
+
+    async def _async_remove_device_from_entry(self, device: dr.DeviceEntry, entry_id: str) -> bool:
+        """Remove a device from a config entry if its integration allows it."""
+        config_entry = self.hass.config_entries.async_get_entry(entry_id)
+        if config_entry is None:
+            return True
+        integration = await async_get_integration(self.hass, config_entry.domain)
+        component = await integration.async_get_component()
+        remove = getattr(component, "async_remove_config_entry_device", None)
+        if remove is None or not await remove(self.hass, config_entry, device):
+            return False
+        self.dreg.async_update_device(device.id, remove_config_entry_id=entry_id)
+        return True
+
+    def _other_content(self, entry_id: str) -> list[str]:
+        """Return what else a config entry holds besides the old devices."""
+        old_ids = {device_id for device_id, _ in self.plan.old_devices}
+        others = [
+            device_name(d)
+            for d in self.dreg.devices.values()
+            if entry_id in d.config_entries and d.id not in old_ids
+        ]
+        others.extend(
+            e.entity_id
+            for e in er.async_entries_for_config_entry(self.ereg, entry_id)
+            if e.device_id not in old_ids
+        )
+        return others
 
     def _schedule_sum_adjustments(self, meters: dict[str, tuple[float, str]]) -> None:
         for pair in self.plan.pairs:

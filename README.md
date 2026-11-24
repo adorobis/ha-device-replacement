@@ -5,7 +5,7 @@ their entity IDs, history, long-term statistics, names, icons, areas and display
 and move to the new device. Automations, scripts, dashboards and the Energy dashboard
 keep working without edits.
 
-> Status: **0.2.0**: engine, actions, reference rewriting, Repairs issues, undo, a UI
+> Status: **0.2.1**: engine, actions, reference rewriting, Repairs issues, undo, a UI
 > wizard, and devices with sub-devices. Tested on Home Assistant 2026.11 with MQTT
 > devices, and in tests with one config entry per device and with the registry data of
 > a real Shelly 2.5 → Shelly Plus 2PM swap.
@@ -90,6 +90,13 @@ Replacement), then open it and choose **Configure**:
    integration reloads) and ends with a summary.
 
 **Undo a replacement** in the same menu lists the replacements that can be undone.
+
+### Removing the old device
+
+With "Remove the old device afterwards" the old device is removed when its integration
+allows removing a single device. Integrations that don't (Shelly removes a device only
+together with its integration entry) get their entry deleted instead, when it holds
+nothing but the old device. Otherwise the summary says what is left to remove by hand.
 
 ### Devices with sub-devices
 
