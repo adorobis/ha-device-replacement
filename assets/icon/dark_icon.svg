@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <!-- cut the old device away around the new one, so they stay apart at any size -->
+    <clipPath id="gap">
+      <path clip-rule="evenodd" d="M0,0 H512 V512 H0 Z M262,194 A76,76 0 0 0 186,270 V422 A76,76 0 0 0 262,498 H414 A76,76 0 0 0 490,422 V270 A76,76 0 0 0 414,194 Z"/>
+    </clipPath>
+  </defs>
+  <!-- old device, behind -->
+  <g clip-path="url(#gap)">
+    <rect x="40" y="48" width="252" height="252" rx="56" fill="#5B6B75"/>
+    <path d="M201.7,128.3 A58,58 0 1 1 130.3,128.3" fill="none" stroke="#8FA3AE" stroke-width="22" stroke-linecap="round"/><line x1="166" y1="110" x2="166" y2="165.3" stroke="#8FA3AE" stroke-width="22" stroke-linecap="round"/>
+  </g>
+  <!-- new device, in front -->
+  <rect x="204" y="212" width="268" height="268" rx="60" fill="#18BCF2"/>
+  <path d="M377.4,295.6 A64,64 0 1 1 298.6,295.6" fill="none" stroke="#FFFFFF" stroke-width="24" stroke-linecap="round"/><line x1="338" y1="276" x2="338" y2="336.4" stroke="#FFFFFF" stroke-width="24" stroke-linecap="round"/>
+  <!-- swap arrow: from the old device over to the new one -->
+  <path d="M318,92 C410,92 448,124 448,176" fill="none" stroke="#ECEFF1"
+        stroke-width="30" stroke-linecap="round"/>
+  <path d="M410,160 L448,206 L486,160 Z" fill="#ECEFF1" stroke="#ECEFF1"
+        stroke-width="10" stroke-linejoin="round"/>
+</svg>
