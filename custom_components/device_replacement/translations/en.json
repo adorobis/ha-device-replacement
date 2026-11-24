@@ -1,0 +1,51 @@
+{
+  "config": {
+    "abort": {
+      "single_instance_allowed": "Device Replacement is already set up."
+    },
+    "step": {
+      "user": {
+        "description": "Adds the actions to replace a broken device with a new one while keeping its entities, history and statistics."
+      }
+    }
+  },
+  "exceptions": {
+    "device_not_found": { "message": "Device {device_id} not found." },
+    "new_not_unloaded": { "message": "These entities of the new device did not unload: {entities}." },
+    "not_loaded": { "message": "Device Replacement is not loaded." },
+    "nothing_to_migrate": { "message": "No entity of the old device is mapped to the new device." },
+    "old_not_unloaded": { "message": "These entities of the old device did not unload: {entities}." },
+    "plan_blocked": { "message": "The replacement is blocked: {reasons}" }
+  },
+  "services": {
+    "execute": {
+      "description": "Replaces the old device with the new one. Mapped entities keep their entity ID, history, statistics and settings and move to the new device.",
+      "fields": {
+        "adjust_energy": { "description": "Correct the statistics sum of meters so the swap does not count as consumption.", "name": "Correct meter sums" },
+        "auto_match": { "description": "Match old entities not in the mapping automatically.", "name": "Match automatically" },
+        "dry_run": { "description": "Only record what would be done.", "name": "Dry run" },
+        "force": { "description": "Run even if the old device still looks online or units do not convert.", "name": "Force" },
+        "keep_units": { "description": "Keep showing sensors in the old unit when the new one reports a convertible unit.", "name": "Keep units" },
+        "mapping": { "description": "Old entity ID to new entity ID; null leaves an old entity unmapped.", "name": "Mapping" },
+        "new_device_id": { "description": "The device taking over.", "name": "New device" },
+        "old_device_id": { "description": "The device being replaced; it must be offline.", "name": "Old device" },
+        "remove_old_device": { "description": "Remove the old device afterwards, if its integration allows it.", "name": "Remove old device" }
+      },
+      "name": "Replace device"
+    },
+    "journal": {
+      "description": "Returns the records of past replacements.",
+      "name": "Replacement journal"
+    },
+    "plan": {
+      "description": "Returns the proposed entity mapping and the compatibility checks, without changing anything.",
+      "fields": {
+        "auto_match": { "description": "Match old entities not in the mapping automatically.", "name": "Match automatically" },
+        "mapping": { "description": "Old entity ID to new entity ID; null leaves an old entity unmapped.", "name": "Mapping" },
+        "new_device_id": { "description": "The device taking over.", "name": "New device" },
+        "old_device_id": { "description": "The device being replaced.", "name": "Old device" }
+      },
+      "name": "Plan replacement"
+    }
+  }
+}

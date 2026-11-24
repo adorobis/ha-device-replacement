@@ -1,0 +1,7 @@
+{
+  "services": {
+    "execute": { "service": "mdi:swap-horizontal" },
+    "journal": { "service": "mdi:history" },
+    "plan": { "service": "mdi:clipboard-list-outline" }
+  }
+}

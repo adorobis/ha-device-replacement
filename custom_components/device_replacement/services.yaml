@@ -1,0 +1,59 @@
+plan:
+  fields:
+    old_device_id:
+      required: true
+      selector:
+        device: {}
+    new_device_id:
+      required: true
+      selector:
+        device: {}
+    mapping:
+      example: '{"sensor.old_power": "sensor.new_power", "sensor.old_rssi": null}'
+      selector:
+        object: {}
+    auto_match:
+      default: true
+      selector:
+        boolean: {}
+
+execute:
+  fields:
+    old_device_id:
+      required: true
+      selector:
+        device: {}
+    new_device_id:
+      required: true
+      selector:
+        device: {}
+    mapping:
+      example: '{"sensor.old_power": "sensor.new_power", "sensor.old_rssi": null}'
+      selector:
+        object: {}
+    auto_match:
+      default: true
+      selector:
+        boolean: {}
+    keep_units:
+      default: true
+      selector:
+        boolean: {}
+    adjust_energy:
+      default: true
+      selector:
+        boolean: {}
+    remove_old_device:
+      default: false
+      selector:
+        boolean: {}
+    force:
+      default: false
+      selector:
+        boolean: {}
+    dry_run:
+      default: false
+      selector:
+        boolean: {}
+
+journal: {}

@@ -1,0 +1,3 @@
+# Keep pytest-homeassistant at the Home Assistant version tested against.
+pytest-homeassistant==2026.11.3
+pytest-cov==7.1.0
